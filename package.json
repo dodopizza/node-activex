@@ -34,6 +34,7 @@
     "node": ">= 4.0.0"
   },
   "scripts": {
+    "install": ": #empty script to stop executing node-gyp rebuild (https://docs.npmjs.com/misc/scripts#default-values)",
     "test": "mocha test"
   },
   "license": "MIT",
