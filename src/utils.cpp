@@ -76,21 +76,51 @@ Local<String> GetWin32ErroroMessage(Isolate *isolate, HRESULT hrcode, LPCOLESTR 
 //-------------------------------------------------------------------------------------------------------
 
 Local<Value> Variant2Array(Isolate *isolate, const VARIANT &v) {
-	Local<Context> ctx = isolate->GetCurrentContext();
 	if ((v.vt & VT_ARRAY) == 0) return Null(isolate);
 	SAFEARRAY *varr = (v.vt & VT_BYREF) != 0 ? *v.pparray : v.parray;
-	if (!varr || varr->cDims != 1) return Null(isolate);
+	if (!varr || varr->cDims > 2 || varr->cDims == 0) return Null(isolate);
+	else if ( varr->cDims == 2 ) return Variant2Array2( isolate, v );
+	Local<Context> ctx = isolate->GetCurrentContext();
 	VARTYPE vt = v.vt & VT_TYPEMASK;
 	LONG cnt = (LONG)varr->rgsabound[0].cElements;
 	Local<Array> arr = Array::New(isolate, cnt);
-	for (LONG i = varr->rgsabound[0].lLbound; i < cnt; i++) {
+	for (LONG i = varr->rgsabound[0].lLbound; i < varr->rgsabound[0].lLbound + cnt; i++) {
 		CComVariant vi;
 		if SUCCEEDED(SafeArrayGetElement(varr, &i, (vt == VT_VARIANT) ? (void*)&vi : (void*)&vi.byref)) {
 			if (vt != VT_VARIANT) vi.vt = vt;
-			arr->Set(ctx, (uint32_t)i, Variant2Value(isolate, vi, true));
+			uint32_t jsi = i - varr->rgsabound[ 0 ].lLbound;
+			arr->Set(ctx, jsi, Variant2Value(isolate, vi, true));
 		}
 	}
 	return arr;
+}
+
+static Local<Value> Variant2Array2(Isolate *isolate, const VARIANT &v) {
+	if ((v.vt & VT_ARRAY) == 0) return Null(isolate);
+	SAFEARRAY *varr = (v.vt & VT_BYREF) != 0 ? *v.pparray : v.parray;
+	if (!varr || varr->cDims != 2) return Null(isolate);
+	Local<Context> ctx = isolate->GetCurrentContext();
+	VARTYPE vt = v.vt & VT_TYPEMASK;
+	LONG cnt1 = (LONG)varr->rgsabound[0].cElements;
+	LONG cnt2 = (LONG)varr->rgsabound[1].cElements;
+	Local<Array> arr1 = Array::New(isolate, cnt2);
+	LONG rgIndices[ 2 ];
+	for (LONG i2 = varr->rgsabound[1].lLbound; i2 < varr->rgsabound[1].lLbound + cnt2; i2++) {
+		rgIndices[ 0 ] = i2;
+		Local<Array> arr2 = Array::New(isolate, cnt1);
+		for (LONG i1 = varr->rgsabound[0].lLbound; i1 < varr->rgsabound[0].lLbound + cnt1; i1++) {
+			CComVariant vi;
+			rgIndices[ 1 ] = i1;
+			if SUCCEEDED(SafeArrayGetElement(varr, &rgIndices[0], (vt == VT_VARIANT) ? (void*)&vi : (void*)&vi.byref)) {
+				if (vt != VT_VARIANT) vi.vt = vt;
+				uint32_t jsi = (uint32_t)i1 - varr->rgsabound[ 0 ].lLbound;
+				arr2->Set(ctx, jsi, Variant2Value(isolate, vi, true));
+			}
+		}
+		uint32_t jsi = i2 - varr->rgsabound[ 1 ].lLbound;
+		arr1->Set(ctx, jsi, arr2);
+	}
+	return arr1;
 }
 
 Local<Value> Variant2Value(Isolate *isolate, const VARIANT &v, bool allow_disp) {
@@ -101,15 +131,25 @@ Local<Value> Variant2Value(Isolate *isolate, const VARIANT &v, bool allow_disp) 
 	case VT_NULL:
 		return Null(isolate);
 	case VT_I1:
+		return Int32::New(isolate, (int32_t)(by_ref ? *v.pcVal : v.cVal));
 	case VT_I2:
+		return Int32::New(isolate, (int32_t)(by_ref ? *v.piVal : v.iVal));
 	case VT_I4:
+		return Int32::New(isolate, (int32_t)(by_ref ? *v.plVal : v.lVal));
 	case VT_INT:
-		return Int32::New(isolate, by_ref ? *v.plVal : v.lVal);
+		return Int32::New(isolate, (int32_t)(by_ref ? *v.pintVal : v.intVal));
 	case VT_UI1:
+		return Int32::New(isolate, (uint32_t)(by_ref ? *v.pbVal : v.bVal));
 	case VT_UI2:
+		return Int32::New(isolate, (uint32_t)(by_ref ? *v.puiVal : v.uiVal));
 	case VT_UI4:
+		return Int32::New(isolate, (uint32_t)(by_ref ? *v.pulVal : v.ulVal));
 	case VT_UINT:
-		return Uint32::New(isolate, by_ref ? *v.pulVal : v.ulVal);
+		return Int32::New(isolate, (uint32_t)(by_ref ? *v.puintVal : v.uintVal));
+	case VT_I8:
+		return Number::New(isolate, (double)(by_ref ? *v.pllVal : v.llVal));
+	case VT_UI8:
+		return Number::New(isolate, (double)(by_ref ? *v.pullVal : v.ullVal));
 	case VT_CY:
 		return Number::New(isolate, (double)(by_ref ? v.pcyVal : &v.cyVal)->int64 / 10000.);
 	case VT_R4:
@@ -171,19 +211,35 @@ Local<Value> Variant2String(Isolate *isolate, const VARIANT &v) {
 		strcpy(buf, "NULL");
 		break;
 	case VT_I1:
+		sprintf_s(buf, "%i", (int)(by_ref ? *v.pcVal : v.cVal));
+		break;
 	case VT_I2:
+		sprintf_s(buf, "%i", (int)(by_ref ? *v.piVal : v.iVal));
+		break;
 	case VT_I4:
-	case VT_INT:
 		sprintf_s(buf, "%i", (int)(by_ref ? *v.plVal : v.lVal));
 		break;
+	case VT_INT:
+		sprintf_s(buf, "%i", (int)(by_ref ? *v.pintVal : v.intVal));
+		break;
 	case VT_UI1:
+		sprintf_s(buf, "%u", (unsigned int)(by_ref ? *v.pbVal : v.bVal));
+		break;
 	case VT_UI2:
+		sprintf_s(buf, "%u", (unsigned int)(by_ref ? *v.puiVal : v.uiVal));
+		break;
 	case VT_UI4:
-	case VT_UINT:
 		sprintf_s(buf, "%u", (unsigned int)(by_ref ? *v.pulVal : v.ulVal));
 		break;
+	case VT_UINT:
+		sprintf_s(buf, "%u", (unsigned int)(by_ref ? *v.puintVal : v.uintVal));
+		break;
 	case VT_CY:
-		sprintf_s(buf, "%03f", (double)(by_ref ? v.pcyVal : &v.cyVal)->int64 / 10000.);
+	case VT_I8:
+		sprintf_s(buf, "%lld", (by_ref ? *v.pllVal : v.llVal));
+		break;
+	case VT_UI8:
+		sprintf_s(buf, "%llu", (by_ref ? *v.pullVal : v.ullVal));
 		break;
 	case VT_R4:
 		sprintf_s(buf, "%f", (double)(by_ref ? *v.pfltVal : v.fltVal));
@@ -260,17 +316,64 @@ void Value2Variant(Isolate *isolate, Local<Value> &val, VARIANT &var, VARTYPE vt
 		uint32_t len = arr->Length();
 		if (vt == VT_EMPTY) vt = VT_VARIANT;
 		var.vt = VT_ARRAY | vt;
-		var.parray = SafeArrayCreateVector(vt, 0, len);
-		for (uint32_t i = 0; i < len; i++) {
-			CComVariant v;
-			Local<Value> val;
-			if (!arr->Get(ctx, i).ToLocal(&val)) val = Undefined(isolate);
-			Value2Variant(isolate, val, v, vt);
-			void *pv;
-			if (vt == VT_VARIANT) pv = (void*)&v;
-			else if (vt == VT_DISPATCH || vt == VT_UNKNOWN || vt == VT_BSTR) pv = v.byref;
-			else pv = (void*)&v.byref;
-			SafeArrayPutElement(var.parray, (LONG*)&i, pv);
+		// if array of arrays, create a 2 dim array, choose the 2nd bound
+		uint32_t second_len = 0;
+		if (len) {
+			Local<Value> first_value;
+			if (arr->Get(ctx, 0).ToLocal(&first_value)) {
+				if (first_value->IsArray()) second_len = v8::Local<Array>::Cast(first_value)->Length();
+			}
+		}
+		if ( second_len == 0 ) {
+			var.parray = SafeArrayCreateVector(vt, 0, len);
+			for (uint32_t i = 0; i < len; i++) {
+				CComVariant v;
+				Local<Value> val;
+				if (!arr->Get(ctx, i).ToLocal(&val)) val = Undefined(isolate);
+				Value2Variant(isolate, val, v, vt);
+				void *pv;
+				if (vt == VT_VARIANT) pv = (void*)&v;
+				else if (vt == VT_DISPATCH || vt == VT_UNKNOWN || vt == VT_BSTR) pv = v.byref;
+				else pv = (void*)&v.byref;
+				SafeArrayPutElement(var.parray, (LONG*)&i, pv);
+			}
+		}
+		else {
+			SAFEARRAYBOUND rgsabounds[ 2 ];
+			rgsabounds[ 0 ].lLbound = rgsabounds[ 1 ].lLbound = 0;
+			rgsabounds[ 0 ].cElements = len;
+			rgsabounds[ 1 ].cElements = second_len;
+			var.parray = SafeArrayCreate(vt, 2, rgsabounds);
+			LONG rgIndices[ 2 ];
+			for (uint32_t i = 0; i < len; i++) {
+				rgIndices[ 0 ] = i;
+				Local<Value> maybearray;
+				Local<Array> arr2;
+				bool bGotArray = false;
+				if (arr->Get( ctx, i ).ToLocal( &maybearray ) && maybearray->IsArray()) {
+					bGotArray = true;
+					arr2 = v8::Local<Array>::Cast(maybearray);
+				}
+				for (uint32_t j = 0; j < second_len; j++) {
+					rgIndices[ 1 ] = j;
+					Local<Value> val;
+					if ( bGotArray ) {
+						if (!arr2->Get(ctx, j).ToLocal(&val)) val = Undefined(isolate);
+					}
+					else {
+						// if no arrays for a "row", the value is put only in first "col"
+						if ( j == 0 ) val = maybearray;
+						else val = Undefined(isolate);
+					}
+					CComVariant v;
+					Value2Variant(isolate, val, v, vt);
+					void *pv;
+					if (vt == VT_VARIANT) pv = (void*)&v;
+					else if (vt == VT_DISPATCH || vt == VT_UNKNOWN || vt == VT_BSTR) pv = v.byref;
+					else pv = (void*)&v.byref;
+					SafeArrayPutElement(var.parray, rgIndices, pv);
+				}
+			}
 		}
 		vt = VT_EMPTY;
 	}

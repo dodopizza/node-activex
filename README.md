@@ -11,7 +11,7 @@
 ``` js 
 var con = new ActiveXObject("ADODB.Connection", {
 	activate: false, // Allow activate existance object instance, false by default
-	async: true, // Allow asynchronius calls, true by default (for future usage)
+	async: true, // Allow asynchronius calls, true by default (not implemented, for future usage)
 	type: true	// Allow using type information, true by default
 });
 ```
@@ -76,7 +76,9 @@ var v_short_from_cast = winax.cast(17, 'short');
  * Additional dignostic propeties:
 	- **__id** - dispatch identity, for exmplae: ADODB.Connection.@Execute.Fields
 	- **__value** - value of dispatch object, equiles valueOf()
-	- **__type** - list member names with their properties
+	- **__type** - array all member items with their properties
+	- **__methods** - list member mathods by names (ITypeInfo::GetFuncDesc)
+	- **__vars** - list member variables by names (ITypeInfo::GetVarDesc) 
 
 # Usage example
 
@@ -143,6 +145,25 @@ Release COM objects (but other temporary objects may be keep references too)
 ``` js
 winax.release(con, rs, fields)
 ```
+Working with Excel ranges using two dimension arrays (from 1.18.0 version)
+* The second dimension is only deduced from the first array.
+* If data is missing at the time of SafeArrayPutElement, VT_EMPTY is used.
+* Best way to explicitly pass VT_EMPTY is to use null
+* If the SAFEARRAY dims are smaller than those of the range, the missing cells are emptied.
+* Exception to 4! Excel may process the SAFEARRAY as it does when processing a copy/paste operation
+``` js
+var excel = new winax.Object("Excel.Application", { activate: true });
+var wbk = excel.Workbooks.Add(template_filename);
+var wsh = wbk.Worksheets.Item(1);
+wsh.Range("C3:E4").Value = [ ["C3", "D3", "E3" ], ["C4", "D4", "E4" ] ];
+wsh.Range("C3:E4").Value = [ ["C3", "D3", "E3" ], "C4" ]; // will let D4 and E4 empty
+wsh.Range("C3:E4").Value = [ [null, "D3", "E3" ], "C4" ]; // will let C3, D4 and E4 empty
+wsh.Range("C3:F4").Value = [ [100], [200] ]; // will duplicate the two rows in colums C, D, E, and F
+wsh.Range("C3:F4").Value = [ [100, 200, 300, 400] ]; // will duplicate the for cols in rows 3 and 4
+wsh.Range("C3:F4").Value = [ [100, 200] ]; // Will correctly duplicate the first two cols, but col E and F with contains "#N/A"
+const data = wsh.Range("C3:E4").Value.valueOf();
+console.log("Cell E4 value is", data[1][2]);
+```
 
 # Tutorial and Examples
 
@@ -160,6 +181,14 @@ To obtain and build use console commands:
 ```
 git clone git://github.com/durs/node-axtivex.git
 cd node-activex
+npm install
+```
+or debug version
+```
+npm install --debug
+```
+or using node-gyp directly
+```
 node-gyp configure
 node-gyp build
 ```
@@ -182,4 +211,5 @@ mocha test
 # Contributors
 
 * [durs](https://github.com/durs)
+* [somanuell](https://github.com/somanuell)
 

@@ -12,10 +12,8 @@
 #define NODE_DEBUG
 #endif
 
-#if V8_MAJOR_VERSION >= 7
-#if V8_MINOR_VERSION > 0	// node v11.13
+#if (V8_MAJOR_VERSION > 7) || (V8_MAJOR_VERSION == 7 && V8_MINOR_VERSION >= 1)
 	#define NODE_BOOL_ISOLATE
-#endif
 #endif
 
 #ifdef NODE_BOOL_ISOLATE
@@ -261,6 +259,22 @@ inline Local<Value> Error(Isolate *isolate, const char *msg) {
 
 //-------------------------------------------------------------------------------------------------------
 
+class NodeObject : public ObjectWrap
+{
+public:
+	template<typename T>
+	static inline T *Unwrap(Local<Object> handle) {
+		if (handle.IsEmpty() || handle->InternalFieldCount() == 0) {
+			return NULL;
+		}
+		void *ptr = handle->GetAlignedPointerFromInternalField(0);
+		NodeObject *obj = static_cast<NodeObject*>(ptr);
+		return static_cast<T*>(obj);
+	}
+};
+
+//-------------------------------------------------------------------------------------------------------
+
 inline HRESULT DispFind(IDispatch *disp, LPOLESTR name, DISPID *dispid) {
 	LPOLESTR names[] = { name };
 	return disp->GetIDsOfNames(GUID_NULL, names, 1, 0, dispid);
@@ -327,6 +341,7 @@ inline INTTYPE Variant2Int(const VARIANT &v, const INTTYPE def) {
 }
 
 Local<Value> Variant2Array(Isolate *isolate, const VARIANT &v);
+Local<Value> Variant2Array2(Isolate *isolate, const VARIANT &v);
 Local<Value> Variant2Value(Isolate *isolate, const VARIANT &v, bool allow_disp = false);
 Local<Value> Variant2String(Isolate *isolate, const VARIANT &v);
 void Value2Variant(Isolate *isolate, Local<Value> &val, VARIANT &var, VARTYPE vt = VT_EMPTY);
